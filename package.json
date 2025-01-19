@@ -15,5 +15,8 @@
   "bugs": {
     "url": "https://github.com/neussi/Medical_Chatbot/issues"
   },
-  "homepage": "https://github.com/neussi/Medical_Chatbot#readme"
+  "homepage": "https://github.com/neussi/Medical_Chatbot#readme",
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
 }
