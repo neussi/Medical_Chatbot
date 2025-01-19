@@ -1,0 +1,19 @@
+{
+  "name": "medical_chatbot",
+  "version": "1.0.0",
+  "description": "<div style=\"text-align: center;\">   <img src=\"./image.png\" alt=\"Logo de l'École Nationale Supérieure Polytechnique de Yaoundé\" style=\"border-radius: 15px; width: 150px; height: auto;\"> </div> <div style=\"text-align: center;\">",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neussi/Medical_Chatbot.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/neussi/Medical_Chatbot/issues"
+  },
+  "homepage": "https://github.com/neussi/Medical_Chatbot#readme"
+}
