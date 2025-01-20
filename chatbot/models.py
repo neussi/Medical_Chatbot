@@ -1,4 +1,6 @@
 from django.db import models
+import json
+
 
 class Symptom(models.Model):
     name_fr = models.CharField(max_length=100)
@@ -51,6 +53,8 @@ class Doctor(models.Model):
     def __str__(self):
         return f"Dr. {self.name} ({self.specialty})"
 
+
+
 class Patient(models.Model):
     phone_number = models.CharField(max_length=20, unique=True)
     name = models.CharField(max_length=100, blank=True)
@@ -63,8 +67,32 @@ class Patient(models.Model):
     conversation_state = models.CharField(max_length=50, default='initial')
     current_symptoms = models.TextField(default='')
 
+    # Nouveaux champs pour la gestion de la conversation
+    current_disease = models.TextField(blank=True, null=True)  # Stocker la maladie actuelle
+    current_medecins = models.TextField(blank=True, null=True)  # Stocker les médecins sous forme de JSON
+    current_hospital = models.TextField(blank=True, null=True)  # Stocker l'hôpital sous forme de JSON
+
     def __str__(self):
         return f"{self.name} ({self.phone_number})"
+
+    # Méthodes pour gérer les données JSON
+    def set_current_medecins(self, medecins):
+        """Convertit la liste des médecins en JSON et la stocke."""
+        self.current_medecins = json.dumps(medecins)
+
+    def get_current_medecins(self):
+        """Convertit le JSON des médecins en liste Python."""
+        return json.loads(self.current_medecins) if self.current_medecins else []
+
+    def set_current_hospital(self, hospital):
+        """Convertit l'hôpital en JSON et le stocke."""
+        self.current_hospital = json.dumps(hospital)
+
+    def get_current_hospital(self):
+        """Convertit le JSON de l'hôpital en dictionnaire Python."""
+        return json.loads(self.current_hospital) if self.current_hospital else {}
+
+
 
 class Consultation(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE)

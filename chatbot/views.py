@@ -1,7 +1,8 @@
 import json
 import logging
+import requests
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from django.http import HttpResponse, HttpResponseNotAllowed
 from django.views.decorators.csrf import csrf_exempt
@@ -14,6 +15,9 @@ from .models import Consultation, Disease, Doctor, Hospital, Patient, Symptom
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+# URL de l'API Node.js
+NODE_API_URL = "http://localhost:3000/moteurinferenceapi/diagnostic"
+
 # Constantes pour les langues
 LANG_FR = 'fr'
 LANG_EN = 'en'
@@ -23,17 +27,13 @@ MESSAGES = {
     LANG_FR: {
         'greeting': "👋 Bonjour! Je suis votre assistant santé virtuel. Comment puis-je vous aider aujourd'hui?\n\n"
                    "1️⃣ Nouvelle consultation médicale 🏥\n"
-                   "2️⃣ Voir mes consultations précédentes 📋",
+                   "2️⃣ Quitter ❌",
         'goodbye': "🙏 Au revoir! Prenez soin de vous. N'hésitez pas à revenir si vous avez besoin d'aide.\n"
                   "Pour une nouvelle consultation, envoyez simplement 'Bonjour'! 👋",
         'ask_symptoms': "🩺 Pour mieux vous aider, décrivez-moi vos symptômes en détail.\n"
                        "Par exemple: 'J'ai de la fièvre, mal à la tête et je tousse'",
         'no_symptoms': "🤔 Je n'ai pas pu identifier vos symptômes. Pouvez-vous les décrire différemment?\n"
                       "Soyez le plus précis possible dans votre description.",
-        'symptoms_detected': "✅ J'ai identifié les symptômes suivants:\n{symptoms}\n\n"
-                           "Est-ce correct?\n"
-                           "1️⃣ Oui\n"
-                           "2️⃣ Non, je veux redécrire mes symptômes",
         'disease_found': "🔍 D'après vos symptômes, il pourrait s'agir de : {disease}\n\n"
                         "📝 Description :\n{description}\n\n"
                         "Niveau de gravité : {severity}\n\n"
@@ -41,11 +41,6 @@ MESSAGES = {
                         "1️⃣ Consulter un médecin spécialiste 👨‍⚕️\n"
                         "2️⃣ Trouver un hôpital proche 🏥\n"
                         "3️⃣ Terminer la consultation ❌",
-        'no_disease': "⚠️ Je n'ai pas pu identifier précisément votre condition.\n"
-                     "Par précaution, je vous recommande de:\n\n"
-                     "1️⃣ Consulter un médecin généraliste 👨‍⚕️\n"
-                     "2️⃣ Vous rendre aux urgences si vos symptômes sont graves 🏥\n"
-                     "3️⃣ Terminer la consultation ❌",
         'doctor_found': "👨‍⚕️ J'ai trouvé un médecin spécialiste pour vous :\n\n"
                        "📛 Dr. {name}\n"
                        "🏥 {hospital}\n"
@@ -54,25 +49,12 @@ MESSAGES = {
                        "Voulez-vous:\n"
                        "1️⃣ Trouver un hôpital\n"
                        "2️⃣ Terminer la consultation",
-        'no_doctor': "😔 Désolé, je n'ai pas trouvé de médecin spécialiste disponible pour le moment.\n"
-                    "Je vous conseille de:\n\n"
-                    "1️⃣ Chercher un hôpital proche\n"
-                    "2️⃣ Terminer la consultation",
         'hospital_found': "🏥 Voici l'hôpital le plus adapté :\n\n"
                         "📍 {name}\n"
                         "🗺️ {address}\n"
                         "📞 {phone}\n"
                         "🚑 Service d'urgence: {emergency}\n\n"
                         "Tapez 'merci' pour terminer la consultation.",
-        'no_hospital': "😔 Désolé, je n'ai pas trouvé d'hôpital spécialisé à proximité.\n"
-                      "Je vous recommande d'appeler le 15 en cas d'urgence.\n\n"
-                      "Tapez 'merci' pour terminer la consultation.",
-        'consultation_history': "📋 Historique de vos consultations:\n\n{history}\n\n"
-                              "Pour une nouvelle consultation, tapez 'nouvelle consultation'",
-        'no_history': "📭 Vous n'avez pas encore de consultation enregistrée.\n\n"
-                     "Voulez-vous commencer une nouvelle consultation?\n"
-                     "1️⃣ Oui\n"
-                     "2️⃣ Non",
         'consultation_saved': "✅ Votre consultation a été enregistrée.\n"
                             "Prenez soin de vous! 💪\n\n"
                             "Pour une nouvelle consultation, envoyez 'Bonjour'",
@@ -89,17 +71,13 @@ MESSAGES = {
     LANG_EN: {
         'greeting': "👋 Hello! I'm your virtual health assistant. How can I help you today?\n\n"
                    "1️⃣ New medical consultation 🏥\n"
-                   "2️⃣ View my previous consultations 📋",
+                   "2️⃣ Quit ❌",
         'goodbye': "🙏 Goodbye! Take care. Don't hesitate to come back if you need help.\n"
                   "For a new consultation, just send 'Hello'! 👋",
         'ask_symptoms': "🩺 To better help you, please describe your symptoms in detail.\n"
                        "For example: 'I have fever, headache and I'm coughing'",
         'no_symptoms': "🤔 I couldn't identify your symptoms. Can you describe them differently?\n"
                       "Please be as precise as possible in your description.",
-        'symptoms_detected': "✅ I identified the following symptoms:\n{symptoms}\n\n"
-                           "Is this correct?\n"
-                           "1️⃣ Yes\n"
-                           "2️⃣ No, I want to describe my symptoms again",
         'disease_found': "🔍 Based on your symptoms, it could be: {disease}\n\n"
                         "📝 Description:\n{description}\n\n"
                         "Severity level: {severity}\n\n"
@@ -107,11 +85,6 @@ MESSAGES = {
                         "1️⃣ Consult a specialist doctor 👨‍⚕️\n"
                         "2️⃣ Find a nearby hospital 🏥\n"
                         "3️⃣ End consultation ❌",
-        'no_disease': "⚠️ I couldn't identify your condition precisely.\n"
-                     "As a precaution, I recommend:\n\n"
-                     "1️⃣ Consulting a general practitioner 👨‍⚕️\n"
-                     "2️⃣ Going to emergency if symptoms are severe 🏥\n"
-                     "3️⃣ End consultation ❌",
         'doctor_found': "👨‍⚕️ I found a specialist doctor for you:\n\n"
                        "📛 Dr. {name}\n"
                        "🏥 {hospital}\n"
@@ -120,25 +93,12 @@ MESSAGES = {
                        "Would you like to:\n"
                        "1️⃣ Find a hospital\n"
                        "2️⃣ End consultation",
-        'no_doctor': "😔 Sorry, I couldn't find an available specialist doctor at the moment.\n"
-                    "I recommend:\n\n"
-                    "1️⃣ Looking for a nearby hospital\n"
-                    "2️⃣ End consultation",
         'hospital_found': "🏥 Here's the most suitable hospital:\n\n"
                         "📍 {name}\n"
                         "🗺️ {address}\n"
                         "📞 {phone}\n"
                         "🚑 Emergency service: {emergency}\n\n"
                         "Type 'thanks' to end the consultation.",
-        'no_hospital': "😔 Sorry, I couldn't find a specialized hospital nearby.\n"
-                      "Please call emergency services if urgent.\n\n"
-                      "Type 'thanks' to end the consultation.",
-        'consultation_history': "📋 Your consultation history:\n\n{history}\n\n"
-                              "For a new consultation, type 'new consultation'",
-        'no_history': "📭 You don't have any recorded consultations yet.\n\n"
-                     "Would you like to start a new consultation?\n"
-                     "1️⃣ Yes\n"
-                     "2️⃣ No",
         'consultation_saved': "✅ Your consultation has been saved.\n"
                             "Take care! 💪\n\n"
                             "For a new consultation, send 'Hello'",
@@ -153,7 +113,6 @@ MESSAGES = {
         }
     }
 }
-
 
 def detect_language(message: str) -> str:
     """Détecte la langue du message."""
@@ -184,100 +143,37 @@ def get_message(key: str, language: str, **kwargs) -> str:
     message = MESSAGES.get(language, MESSAGES[LANG_FR]).get(key, MESSAGES[LANG_FR].get(key, ''))
     return message.format(**kwargs) if kwargs else message
 
-def find_symptoms(text: str, language: str) -> List[Symptom]:
-    """Trouve les symptômes correspondants dans le texte."""
-    text = text.lower()
-    matching_symptoms = []
-    
-    for symptom in Symptom.objects.all():
-        keywords = getattr(symptom, f'keywords_{language}', '').split(',')
-        if any(keyword.strip() in text for keyword in keywords):
-            matching_symptoms.append(symptom)
-    
-    return matching_symptoms
-
-def find_best_disease(symptoms: List[Symptom]) -> Tuple[Optional[Disease], float]:
-    """Trouve la maladie la plus probable et son score de correspondance."""
-    if not symptoms:
-        return None, 0.0
-    
-    diseases = Disease.objects.filter(symptoms__in=symptoms).distinct()
-    best_match = None
-    best_score = 0.0
-    
-    for disease in diseases:
-        disease_symptoms = set(disease.symptoms.all())
-        patient_symptoms = set(symptoms)
-        
-        # Calcul du score avec pondération par gravité
-        common_symptoms = disease_symptoms.intersection(patient_symptoms)
-        score = (len(common_symptoms) / len(disease_symptoms)) * (1 + (disease.severity / 10))
-        
-        if score > best_score:
-            best_score = score
-            best_match = disease
-    
-    return best_match, best_score
-
-def find_doctor(disease: Disease, language: str) -> Optional[Doctor]:
-    """Trouve un médecin approprié pour la maladie."""
-    return Doctor.objects.filter(
-        specialty=disease.specialty,
-        available=True,
-        languages__contains=language
-    ).first()
-
-def find_hospital(disease: Disease) -> Optional[Hospital]:
-    """Trouve un hôpital approprié pour la maladie."""
-    return Hospital.objects.filter(
-        specialties__contains=disease.specialty,
-    ).first()
-
-def format_consultation_history(patient: Patient, language: str) -> str:
-    """Formate l'historique des consultations."""
-    consultations = Consultation.objects.filter(patient=patient).order_by('-created_at')[:5]
-    
-    if not consultations:
-        return get_message('no_history', language)
-    
-    history_items = []
-    for cons in consultations:
-        disease_name = getattr(cons.disease, f'name_{language}', 'Non diagnostiqué') if cons.disease else 'Non diagnostiqué'
-        severity = MESSAGES[language]['severity_levels'].get(cons.severity, '')
-        
-        symptoms = ', '.join(getattr(s, f'name_{language}') for s in cons.symptoms.all())
-        
-        history_items.append(
-            f"📅 {cons.created_at.strftime('%d/%m/%Y %H:%M')}\n"
-            f"🔍 Diagnostic: {disease_name}\n"
-            f"⚡ Gravité: {severity}\n"
-            f"🩺 Symptômes: {symptoms}\n"
-            f"👨‍⚕️ Médecin: {cons.doctor.name if cons.doctor else 'Non assigné'}\n"
-            f"🏥 Hôpital: {cons.hospital.name if cons.hospital else 'Non assigné'}\n"
-            f"📝 Notes: {cons.notes if cons.notes else 'Aucune note'}\n"
+def send_symptoms_to_api(symptoms: List[str]) -> Optional[Dict]:
+    """Envoie les symptômes à l'API Node.js et retourne la réponse."""
+    try:
+        response = requests.post(
+            NODE_API_URL,
+            json={"symptoms": symptoms},
+            headers={"Content-Type": "application/json"}
         )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.error(f"Error sending symptoms to API: {str(e)}")
+        return None 
     
-    return '\n\n'.join(history_items)
 
-def save_consultation(
-    patient: Patient,
-    symptoms: List[Symptom],
-    disease: Optional[Disease] = None,
-    doctor: Optional[Doctor] = None,
-    hospital: Optional[Hospital] = None,
-    notes: str = ''
-) -> Consultation:
-    """Enregistre une nouvelle consultation."""
-    consultation = Consultation.objects.create(
-        patient=patient,
-        disease=disease,
-        doctor=doctor,
-        hospital=hospital,
-        notes=notes,
-        severity=disease.severity if disease else 1
-    )
-    consultation.symptoms.set(symptoms)
-    return consultation
+
+
+
+
+
+
+
+
+
+
+
+
+import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 def handle_conversation_state(patient: Patient, message: str) -> str:
     """Gère l'état de la conversation et renvoie la réponse appropriée."""
@@ -299,18 +195,7 @@ def handle_conversation_state(patient: Patient, message: str) -> str:
         
         # Gestion des au revoir
         if is_goodbye(message):
-            # Sauvegarder la consultation si elle était en cours
-            if hasattr(patient, 'current_symptoms') and patient.current_symptoms:
-                symptoms = [Symptom.objects.get(id=int(s_id)) for s_id in patient.current_symptoms.split(',') if s_id]
-                if symptoms:
-                    disease = None
-                    if hasattr(patient, 'current_disease') and patient.current_disease:
-                        disease = Disease.objects.get(id=int(patient.current_disease))
-                    save_consultation(patient, symptoms, disease)
-            
             patient.conversation_state = 'initial'
-            patient.current_symptoms = ''
-            patient.current_disease = None
             patient.save()
             logger.info(f"New state: {patient.conversation_state}")
             return get_message('goodbye', language)
@@ -322,107 +207,115 @@ def handle_conversation_state(patient: Patient, message: str) -> str:
                 patient.save()
                 logger.info(f"New state: {patient.conversation_state}")
                 return get_message('ask_symptoms', language)
-            elif message in ['2', 'historique', 'history']:
-                return get_message('consultation_history', language, 
-                                 history=format_consultation_history(patient, language))
+            elif message in ['2', 'quitter', 'quit']:
+                patient.conversation_state = 'initial'
+                patient.save()
+                logger.info(f"New state: {patient.conversation_state}")
+                return get_message('goodbye', language)
             else:
-                # Renvoyer le menu principal au lieu d'un message d'erreur
-                return get_message('greeting', language)
+                return get_message('invalid_choice', language)
         
         elif state == 'attente_symptomes':
-            symptoms = find_symptoms(message, language)
-            logger.info(f"Detected symptoms: {symptoms}")
-            if not symptoms:
-                return get_message('no_symptoms', language)
+            # Récupérer les symptômes de l'utilisateur
+            symptoms = [s.strip() for s in message.split(',')]  # Séparer les symptômes par des virgules
+            logger.info(f"Symptoms received: {symptoms}")
             
-            # Stockage temporaire des symptômes
-            patient.current_symptoms = ','.join(str(s.id) for s in symptoms)
-            patient.conversation_state = 'confirmation_symptomes'
+            # Envoyer les symptômes à l'API Node.js
+            api_response = send_symptoms_to_api(symptoms)
+            if not api_response:
+                return get_message('error', language)
+            
+            # Extraire les informations de la réponse de l'API
+            disease = api_response.get("maladie", "Inconnu")
+            description = api_response.get("description", "Aucune description disponible")
+            severity = api_response.get("severity", 1)
+            medecins = api_response.get("medecins", [])
+            
+            # Construire l'objet hospital à partir des informations du premier médecin
+            hospital = {}
+            if medecins and isinstance(medecins, list):
+                medecin = medecins[0] if medecins else {}
+                if isinstance(medecin, dict):
+                    hospital = {
+                        "name": medecin.get("adresse", "Inconnu"),  # Utiliser l'adresse du médecin comme nom de l'hôpital
+                        "address": medecin.get("adresse", "Inconnu"),
+                        "phone": medecin.get("telephone", "Inconnu"),  # Utiliser le numéro de téléphone du médecin
+                        "emergency": True  # Service d'urgence par défaut
+                    }
+            
+            # Stocker les informations dans le patient (pour une utilisation ultérieure)
+            patient.current_disease = disease
+            patient.current_medecins = json.dumps(medecins)  # Convertir en JSON pour stockage
+            patient.current_hospital = json.dumps(hospital)  # Convertir en JSON pour stockage
+            patient.conversation_state = 'proposition_actions'
             patient.save()
             logger.info(f"New state: {patient.conversation_state}")
             
-            symptoms_text = '\n'.join(f"- {getattr(s, f'name_{language}')}" for s in symptoms)
-            return get_message('symptoms_detected', language, symptoms=symptoms_text)
-        
-        elif state == 'confirmation_symptomes':
-            if message == '1':  # Confirmation des symptômes
-                symptoms = [Symptom.objects.get(id=int(s_id)) for s_id in patient.current_symptoms.split(',')]
-                disease, score = find_best_disease(symptoms)
-                logger.info(f"Best match: {disease.name_fr if disease else 'None'} with score {score}")
-                
-                if disease and score > 0.5:  # Seuil de confiance
-                    patient.current_disease = disease.id
-                    patient.conversation_state = 'proposition_actions'
-                    patient.save()
-                    logger.info(f"New state: {patient.conversation_state}")
-                    
-                    return get_message('disease_found', language,
-                                     disease=getattr(disease, f'name_{language}'),
-                                     description=getattr(disease, f'description_{language}'),
-                                     severity=MESSAGES[language]['severity_levels'][disease.severity])
-                else:
-                    return get_message('no_disease', language)
-            
-            elif message == '2':  # Nouvelle saisie des symptômes
-                patient.current_symptoms = ''
-                patient.conversation_state = 'attente_symptomes'
-                patient.save()
-                logger.info(f"New state: {patient.conversation_state}")
-                return get_message('ask_symptoms', language)
-            
-            else:
-                # Renvoyer le message de confirmation au lieu d'un message d'erreur
-                symptoms = [Symptom.objects.get(id=int(s_id)) for s_id in patient.current_symptoms.split(',')]
-                symptoms_text = '\n'.join(f"- {getattr(s, f'name_{language}')}" for s in symptoms)
-                return get_message('symptoms_detected', language, symptoms=symptoms_text)
+            # Retourner les informations à l'utilisateur
+            return get_message('disease_found', language,
+                             disease=disease,
+                             description=description,
+                             severity=MESSAGES[language]['severity_levels'].get(severity, "Inconnu"))
         
         elif state == 'proposition_actions':
-            disease = Disease.objects.get(id=int(patient.current_disease)) if patient.current_disease else None
-            
             if message == '1':  # Recherche médecin
-                if disease:
-                    doctor = find_doctor(disease, language)
-                    if doctor:
+                # Désérialiser les médecins depuis JSON
+                try:
+                    medecins = json.loads(patient.current_medecins) if patient.current_medecins else []
+                except json.JSONDecodeError:
+                    medecins = []
+                
+                if medecins and isinstance(medecins, list):  # Vérifier que c'est une liste
+                    medecin = medecins[0] if medecins else {}
+                    if isinstance(medecin, dict):  # Vérifier que c'est un dictionnaire
                         return get_message('doctor_found', language,
-                                         name=doctor.name,
-                                         hospital=doctor.hospital.name,
-                                         phone=doctor.phone,
-                                         languages=doctor.languages)
+                                         name=f"{medecin.get('prenom', '')} {medecin.get('nom', '')}",
+                                         hospital=medecin.get("adresse", "Inconnu"),
+                                         phone=medecin.get("telephone", "Inconnu"),
+                                         languages=medecin.get("langues", "Inconnu"))
                 return get_message('no_doctor', language)
             
             elif message == '2':  # Recherche hôpital
-                if disease:
-                    hospital = find_hospital(disease)
-                    if hospital:
-                        return get_message('hospital_found', language,
-                                         name=hospital.name,
-                                         address=hospital.address,
-                                         phone=hospital.phone,
-                                         emergency='✅' if hospital.emergency else '❌')
-                return get_message('no_hospital', language)
+                # Désérialiser l'hôpital depuis JSON
+                try:
+                    hospital = json.loads(patient.current_hospital) if patient.current_hospital else {}
+                except json.JSONDecodeError:
+                    hospital = {}
+                
+                if hospital and isinstance(hospital, dict):  # Vérifier que c'est un dictionnaire
+                    return get_message('hospital_found', language,
+                                     name=hospital.get("name", "Inconnu"),
+                                     address=hospital.get("address", "Inconnu"),
+                                     phone=hospital.get("phone", "Inconnu"),
+                                     emergency='✅' if hospital.get("emergency", False) else '❌')
+                else:
+                    return get_message('no_hospital', language)
             
             elif message == '3':  # Fin de consultation
-                symptoms = [Symptom.objects.get(id=int(s_id)) for s_id in patient.current_symptoms.split(',')]
-                save_consultation(patient, symptoms, disease)
-                
                 patient.conversation_state = 'initial'
-                patient.current_symptoms = ''
-                patient.current_disease = None
                 patient.save()
                 logger.info(f"New state: {patient.conversation_state}")
-                
                 return get_message('consultation_saved', language)
             
             else:
-                # Renvoyer les options au lieu d'un message d'erreur
-                return get_message('disease_found', language,
-                                 disease=getattr(disease, f'name_{language}'),
-                                 description=getattr(disease, f'description_{language}'),
-                                 severity=MESSAGES[language]['severity_levels'][disease.severity])
+                return get_message('invalid_choice', language)
         
     except Exception as e:
         logger.error(f"Error in handle_conversation_state: {str(e)}")
         return get_message('error', language)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
