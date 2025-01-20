@@ -94,20 +94,13 @@ class Patient(models.Model):
 
 
 
+
 class Consultation(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-    symptoms = models.ManyToManyField(Symptom)
     disease = models.ForeignKey(Disease, on_delete=models.SET_NULL, null=True)
     doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, null=True)
     hospital = models.ForeignKey(Hospital, on_delete=models.SET_NULL, null=True)
-    notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    severity = models.IntegerField(choices=[
-        (1, 'Légère'),
-        (2, 'Modérée'),
-        (3, 'Sévère'),
-        (4, 'Critique')
-    ], default=1)
 
     def __str__(self):
         return f"Consultation for {self.patient} on {self.created_at}"

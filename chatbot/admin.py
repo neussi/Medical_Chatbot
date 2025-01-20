@@ -33,7 +33,6 @@ class PatientAdmin(admin.ModelAdmin):
 
 @admin.register(Consultation)
 class ConsultationAdmin(admin.ModelAdmin):
-    list_display = ('patient', 'doctor', 'hospital', 'created_at', 'severity')
-    list_filter = ('severity', 'created_at')
-    search_fields = ('patient__name', 'doctor__name', 'notes')
-    filter_horizontal = ('symptoms',)
+    list_display = ('patient', 'disease', 'doctor', 'hospital', 'created_at')
+    list_filter = ('created_at',)
+    search_fields = ('patient__name', 'doctor__nom', 'disease__name')

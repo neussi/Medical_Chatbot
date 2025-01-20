@@ -27,7 +27,8 @@ MESSAGES = {
     LANG_FR: {
         'greeting': "👋 Bonjour! Je suis votre assistant santé virtuel. Comment puis-je vous aider aujourd'hui?\n\n"
                    "1️⃣ Nouvelle consultation médicale 🏥\n"
-                   "2️⃣ Quitter ❌",
+                   "2️⃣ Dernières consultations 📄\n"
+                   "3️⃣ Quitter ❌",
         'goodbye': "🙏 Au revoir! Prenez soin de vous. N'hésitez pas à revenir si vous avez besoin d'aide.\n"
                   "Pour une nouvelle consultation, envoyez simplement 'Bonjour'! 👋",
         'ask_symptoms': "🩺 Pour mieux vous aider, décrivez-moi vos symptômes en détail.\n"
@@ -61,6 +62,7 @@ MESSAGES = {
         'error': "❌ Désolé, une erreur est survenue. Veuillez réessayer en envoyant 'Bonjour'.",
         'invalid_choice': "⚠️ Je n'ai pas compris votre choix.\n"
                          "Veuillez répondre avec le numéro correspondant à votre choix.",
+        'no_consultations': "📄 Vous n'avez aucune consultation enregistrée.",
         'severity_levels': {
             1: "⚪ Légère",
             2: "🟡 Modérée",
@@ -71,7 +73,8 @@ MESSAGES = {
     LANG_EN: {
         'greeting': "👋 Hello! I'm your virtual health assistant. How can I help you today?\n\n"
                    "1️⃣ New medical consultation 🏥\n"
-                   "2️⃣ Quit ❌",
+                   "2️⃣ Last consultations 📄\n"
+                   "3️⃣ Quit ❌",
         'goodbye': "🙏 Goodbye! Take care. Don't hesitate to come back if you need help.\n"
                   "For a new consultation, just send 'Hello'! 👋",
         'ask_symptoms': "🩺 To better help you, please describe your symptoms in detail.\n"
@@ -105,6 +108,7 @@ MESSAGES = {
         'error': "❌ Sorry, an error occurred. Please try again by sending 'Hello'.",
         'invalid_choice': "⚠️ I didn't understand your choice.\n"
                          "Please respond with the number corresponding to your choice.",
+        'no_consultations': "📄 You have no consultations recorded.",
         'severity_levels': {
             1: "⚪ Mild",
             2: "🟡 Moderate",
@@ -155,25 +159,12 @@ def send_symptoms_to_api(symptoms: List[str]) -> Optional[Dict]:
         return response.json()
     except Exception as e:
         logger.error(f"Error sending symptoms to API: {str(e)}")
-        return None 
-    
+        return None
 
 
 
 
 
-
-
-
-
-
-
-
-
-import json
-import logging
-
-logger = logging.getLogger(__name__)
 
 def handle_conversation_state(patient: Patient, message: str) -> str:
     """Gère l'état de la conversation et renvoie la réponse appropriée."""
@@ -195,6 +186,10 @@ def handle_conversation_state(patient: Patient, message: str) -> str:
         
         # Gestion des au revoir
         if is_goodbye(message):
+            # Enregistrer la consultation avant de terminer
+            if state == 'proposition_actions':
+                save_consultation(patient)
+            
             patient.conversation_state = 'initial'
             patient.save()
             logger.info(f"New state: {patient.conversation_state}")
@@ -207,7 +202,22 @@ def handle_conversation_state(patient: Patient, message: str) -> str:
                 patient.save()
                 logger.info(f"New state: {patient.conversation_state}")
                 return get_message('ask_symptoms', language)
-            elif message in ['2', 'quitter', 'quit']:
+            elif message in ['2', 'dernieres consultations', 'last consultations']:
+                # Récupérer les deux dernières consultations
+                consultations = Consultation.objects.filter(patient=patient).order_by('-created_at')[:2]
+                if consultations:
+                    response = "📄 Vos deux dernières consultations :\n\n"
+                    for consultation in consultations:
+                        response += (
+                            f"📅 Date: {consultation.created_at.strftime('%Y-%m-%d %H:%M')}\n"
+                            f"🩺 Maladie: {consultation.disease.name_fr if consultation.disease else 'Inconnu'}\n"
+                            f"👨‍⚕️ Médecin: {consultation.doctor.name if consultation.doctor else 'Inconnu'}\n"
+                            f"🏥 Adresse: {consultation.hospital.address if consultation.hospital else 'Inconnu'}\n\n"
+                        )
+                    return response
+                else:
+                    return get_message('no_consultations', language)
+            elif message in ['3', 'quitter', 'quit']:
                 patient.conversation_state = 'initial'
                 patient.save()
                 logger.info(f"New state: {patient.conversation_state}")
@@ -291,7 +301,11 @@ def handle_conversation_state(patient: Patient, message: str) -> str:
                 else:
                     return get_message('no_hospital', language)
             
-            elif message == '3':  # Fin de consultation
+            elif message == '3' or is_goodbye(message):  # Fin de consultation ou "merci"
+                # Enregistrer la consultation avant de terminer
+                save_consultation(patient)
+                
+                # Réinitialiser l'état de la conversation
                 patient.conversation_state = 'initial'
                 patient.save()
                 logger.info(f"New state: {patient.conversation_state}")
@@ -307,6 +321,116 @@ def handle_conversation_state(patient: Patient, message: str) -> str:
 
 
 
+
+
+
+
+
+
+
+
+def save_consultation(patient: Patient):
+    """Enregistre la consultation dans la base de données."""
+    try:
+        # Récupérer les données nécessaires
+        disease_name = patient.current_disease
+        medecins = patient.get_current_medecins()  # Récupérer les médecins sous forme de liste
+        hospital_data = patient.get_current_hospital()  # Récupérer l'hôpital sous forme de dictionnaire
+        
+        # Vérifier que le nom de la maladie est fourni
+        if not disease_name:
+            logger.error("No disease name provided for the consultation.")
+            return
+
+        # Récupérer ou créer la maladie en fonction de la langue du patient
+        language = patient.language
+        if language == 'fr':
+            disease, created = Disease.objects.get_or_create(
+                name_fr=disease_name,
+                defaults={
+                    'name_en': disease_name,  # Valeur par défaut pour name_en
+                    'severity': 1,  # Valeur par défaut pour severity (Légère)
+                    'description_fr': 'Description non disponible',  # Valeur par défaut
+                    'description_en': 'Description not available'  # Valeur par défaut
+                }
+            )
+        else:
+            disease, created = Disease.objects.get_or_create(
+                name_en=disease_name,
+                defaults={
+                    'name_fr': disease_name,  # Valeur par défaut pour name_fr
+                    'severity': 1,  # Valeur par défaut pour severity (Légère)
+                    'description_fr': 'Description non disponible',  # Valeur par défaut
+                    'description_en': 'Description not available'  # Valeur par défaut
+                }
+            )
+        
+        # Récupérer ou créer l'hôpital
+        hospital = None
+        if hospital_data and isinstance(hospital_data, dict):
+            hospital, _ = Hospital.objects.get_or_create(
+                name=hospital_data.get('name', ''),
+                defaults={
+                    'address': hospital_data.get('address', ''),
+                    'latitude': hospital_data.get('latitude', 0.0),
+                    'longitude': hospital_data.get('longitude', 0.0),
+                    'phone': hospital_data.get('phone', ''),
+                    'specialties': hospital_data.get('specialties', ''),
+                    'emergency': hospital_data.get('emergency', False)
+                }
+            )
+        
+        # Récupérer ou créer le médecin
+        doctor = None
+        if medecins and isinstance(medecins, list):
+            medecin_data = medecins[0] if medecins else {}
+            if isinstance(medecin_data, dict):
+                # Construire le nom complet du médecin (nom + prénom)
+                nom = medecin_data.get('nom', '')
+                prenom = medecin_data.get('prenom', '')
+                doctor_name = f"{prenom} {nom}".strip()  # Combiner prénom et nom
+                
+                if not doctor_name:
+                    logger.error("No doctor name provided in medecin_data.")
+                    return
+                
+                # Si un hôpital est spécifié dans les données du médecin, l'utiliser
+                if 'adresse' in medecin_data:
+                    hospital, _ = Hospital.objects.get_or_create(
+                        name=medecin_data.get('adresse', ''),  # Utiliser l'adresse comme nom de l'hôpital
+                        defaults={
+                            'address': medecin_data.get('adresse', ''),
+                            'latitude': 0.0,  # Valeur par défaut
+                            'longitude': 0.0,  # Valeur par défaut
+                            'phone': medecin_data.get('telephone', ''),
+                            'specialties': medecin_data.get('specialite', ''),
+                            'emergency': True  # Service d'urgence par défaut
+                        }
+                    )
+                
+                # Récupérer ou créer le médecin
+                doctor, _ = Doctor.objects.get_or_create(
+                    name=doctor_name,
+                    defaults={
+                        'specialty': medecin_data.get('specialite', ''),
+                        'hospital': hospital,  # Associer l'hôpital au médecin
+                        'phone': medecin_data.get('telephone', ''),
+                        'languages': 'Français',  # Langue par défaut
+                        'available': True  # Disponibilité par défaut
+                    }
+                )
+        
+        # Créer la consultation
+        Consultation.objects.create(
+            patient=patient,
+            disease=disease,
+            doctor=doctor,
+            hospital=hospital
+        )
+        
+        logger.info(f"Consultation saved for patient {patient.phone_number}")
+    except Exception as e:
+        logger.error(f"Error saving consultation: {str(e)}")
 
 
 
@@ -367,4 +491,4 @@ def webhook(request):
 
     except Exception as e:
         logger.error(f"Unexpected error in webhook: {str(e)}")
-        return HttpResponse("Internal Server Error", status=500)
+        return HttpResponse("Internal Server Error", status=500)     
